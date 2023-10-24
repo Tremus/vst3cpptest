@@ -9,7 +9,8 @@
 #include <public.sdk/source/vst/vsteditcontroller.h>
 #include <vstgui/plugin-bindings/vst3editor.h>
 
-// Example project. Only Part 1 (gain parameter) completed
+// Example project based on tutorial
+// Implements gain parameter, param change events, opt. aux input for sidechaining
 // https://steinbergmedia.github.io/vst3_dev_portal/pages/Tutorials/Code+your+first+plug-in.html#part-1-coding-your-plug-in
 
 #define FULL_VERSION_STR       "1.0.0.0"
@@ -160,7 +161,11 @@ struct VST3TestProcessor : public Steinberg::Vst::AudioEffect
         addAudioOutput(STR16("Stereo Out"), Steinberg::Vst::SpeakerArr::kStereo);
 
         /* If you don't need an event bus, you can remove the next line */
+        //---create Event In/Out busses (1 bus with only 1 channel)------
         addEventInput(STR16("Event In"), 1);
+
+        // create a Mono SideChain input bus
+        addAudioInput(STR16("Mono Aux In"), Steinberg::Vst::SpeakerArr::kMono, Steinberg::Vst::kAux, 0);
 
         return Steinberg::kResultOk;
     }
@@ -168,6 +173,38 @@ struct VST3TestProcessor : public Steinberg::Vst::AudioEffect
 
     /** Switch the Plug-in on/off */
     Steinberg::tresult PLUGIN_API setActive(Steinberg::TBool state) override { return AudioEffect::setActive(state); }
+
+    Steinberg::tresult PLUGIN_API setBusArrangements(
+        Steinberg::Vst::SpeakerArrangement* inputs,
+        Steinberg::int32                    numIns,
+        Steinberg::Vst::SpeakerArrangement* outputs,
+        Steinberg::int32                    numOuts) override
+    {
+        // the first input is the Main Input and the second is the SideChain Input
+        // be sure that we have 2 inputs and 1 output
+        if (numIns == 2 && numOuts == 1)
+        {
+            // we support only when Main input has the same number of channel than the output
+            if (Steinberg::Vst::SpeakerArr::getChannelCount(inputs[0]) !=
+                Steinberg::Vst::SpeakerArr::getChannelCount(outputs[0]))
+                return Steinberg::kResultFalse;
+
+            // we are agree with all arrangement for Main Input and output
+            // then apply them
+            getAudioInput(0)->setArrangement(inputs[0]);
+            getAudioOutput(0)->setArrangement(outputs[0]);
+
+            // Now check if sidechain is mono (we support in our example only mono Side-chain)
+            if (Steinberg::Vst::SpeakerArr::getChannelCount(inputs[1]) != 1)
+                return Steinberg::kResultFalse;
+
+            // OK the Side-chain is mono, we accept this by returning kResultTrue
+            return Steinberg::kResultTrue;
+        }
+
+        // we do not accept what the host wants: return kResultFalse !
+        return Steinberg::kResultFalse;
+    }
 
     /** Will be called before any process call */
     Steinberg::tresult PLUGIN_API setupProcessing(Steinberg::Vst::ProcessSetup& newSetup) override
@@ -208,7 +245,8 @@ struct VST3TestProcessor : public Steinberg::Vst::AudioEffect
         return Steinberg::kResultOk;
     }
 
-    Steinberg::Vst::ParamValue mGain = 1.0f;
+    Steinberg::Vst::ParamValue mGain          = 1.0;
+    Steinberg::Vst::ParamValue mGainReduction = 0.0;
 };
 
 //------------------------------------------------------------------------
@@ -243,6 +281,34 @@ Steinberg::tresult PLUGIN_API VST3TestProcessor::process(Steinberg::Vst::Process
         }
     }
 
+    //---Second: Read input events-------------
+    // get the list of all event changes
+    Steinberg::Vst::IEventList* eventList = data.inputEvents;
+    if (eventList)
+    {
+        Steinberg::int32 numEvent = eventList->getEventCount();
+        for (Steinberg::int32 i = 0; i < numEvent; i++)
+        {
+            Steinberg::Vst::Event event;
+            if (eventList->getEvent(i, event) == Steinberg::kResultOk)
+            {
+                // here we do not take care of the channel info of the event
+                switch (event.type)
+                {
+                case Steinberg::Vst::Event::kNoteOnEvent:
+                    // use the velocity as gain modifier: a velocity max (1) will lead to silent audio
+                    mGainReduction = event.noteOn.velocity; // value between 0 and 1
+                    break;
+
+                case Steinberg::Vst::Event::kNoteOffEvent:
+                    // noteOff reset the gain modifier
+                    mGainReduction = 0.f;
+                    break;
+                }
+            }
+        }
+    }
+
     //-- Flush case: we only need to update parameter, noprocessing possible
     if (data.numInputs == 0 || data.numSamples == 0)
         return Steinberg::kResultOk;
@@ -254,28 +320,6 @@ Steinberg::tresult PLUGIN_API VST3TestProcessor::process(Steinberg::Vst::Process
     Steinberg::uint32 sampleFramesSize = getSampleFramesSizeInBytes(processSetup, data.numSamples);
     void**            in               = getChannelBuffersPointer(processSetup, data.inputs[0]);
     void**            out              = getChannelBuffersPointer(processSetup, data.outputs[0]);
-
-    // Here could check the silent flags
-    // now we will produce the output
-    // mark our outputs has not silent
-    data.outputs[0].silenceFlags = 0;
-
-    float gain = mGain;
-    // for each channel (left and right)
-    for (Steinberg::int32 i = 0; i < numChannels; i++)
-    {
-        Steinberg::int32          samples = data.numSamples;
-        Steinberg::Vst::Sample32* ptrIn   = (Steinberg::Vst::Sample32*)in[i];
-        Steinberg::Vst::Sample32* ptrOut  = (Steinberg::Vst::Sample32*)out[i];
-        Steinberg::Vst::Sample32  tmp;
-        // for each sample in this channel
-        while (--samples >= 0)
-        {
-            // apply gain
-            tmp         = (*ptrIn++) * gain;
-            (*ptrOut++) = tmp;
-        }
-    }
 
     // Here could check the silent flags
     //---check if silence---------------
@@ -292,6 +336,61 @@ Steinberg::tresult PLUGIN_API VST3TestProcessor::process(Steinberg::Vst::Process
             // already cleared by the host)
             if (in[i] != out[i])
                 memset(out[i], 0, sampleFramesSize);
+        }
+        // nothing to do at this point
+        return Steinberg::kResultOk;
+    }
+
+    float gain = mGain - mGainReduction;
+    if (gain < 0.f) // gain should always positive or zero
+        gain = 0.f;
+
+    void** auxIn = nullptr;
+
+    // Check if the Side-chain input is activated
+    bool auxActive = false;
+    if (getAudioInput(1)->isActive())
+    {
+        auxIn     = getChannelBuffersPointer(processSetup, data.inputs[1]);
+        auxActive = true;
+    }
+    if (auxActive)
+    {
+        // for each channel (left and right)
+        for (Steinberg::int32 i = 0; i < numChannels; i++)
+        {
+            Steinberg::int32          samples = data.numSamples;
+            Steinberg::Vst::Sample32* ptrIn   = (Steinberg::Vst::Sample32*)in[i];
+            Steinberg::Vst::Sample32* ptrOut  = (Steinberg::Vst::Sample32*)out[i];
+            // Side-chain is mono, so take auxIn[0]: index 0
+            Steinberg::Vst::Sample32* ptrAux = (Steinberg::Vst::Sample32*)auxIn[0];
+            Steinberg::Vst::Sample32  tmp;
+
+            // for each sample in this channel
+            while (--samples >= 0)
+            {
+                // apply modulation and gain
+                tmp         = (*ptrIn++) * (*ptrAux++) * gain;
+                (*ptrOut++) = tmp;
+            }
+        }
+    }
+    else
+    {
+        // for each channel (left and right)
+        for (Steinberg::int32 i = 0; i < numChannels; i++)
+        {
+            Steinberg::int32          samples = data.numSamples;
+            Steinberg::Vst::Sample32* ptrIn   = (Steinberg::Vst::Sample32*)in[i];
+            Steinberg::Vst::Sample32* ptrOut  = (Steinberg::Vst::Sample32*)out[i];
+            Steinberg::Vst::Sample32  tmp;
+            // for each sample in this channel
+            while (--samples >= 0)
+            {
+                // apply gain
+                tmp         = (*ptrIn++) * gain;
+                (*ptrOut++) = tmp;
+            }
         }
     }
 
