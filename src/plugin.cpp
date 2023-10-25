@@ -22,8 +22,9 @@
 #define stringCompanyEmail     "compile@deeznuts.com"
 #define stringLegalCopyright   "Copyright(c) 2023 ."
 #define stringLegalTrademarks  "VST is a trademark of Steinberg Media Technologies GmbH"
-#define VST3TestVST3Category   "Fx"
+#define VST3TestVST3Category   Steinberg::Vst::PlugType::kFxTools
 
+// Make sure you generate new sets of UUIDs for you own plugin.
 // https://guidgenerator.com/
 static const Steinberg::FUID kVST3TestProcessorUID(0x13253970, 0x860055F6, 0xAE96C583, 0xF1C9E39A);
 static const Steinberg::FUID kVST3TestControllerUID(0x67B44A1F, 0xEEBD5DCF, 0x8526EA52, 0x26EEDC33);
@@ -410,26 +411,26 @@ BEGIN_FACTORY_DEF(stringCompanyName, stringCompanyURL, stringCompanyEmail)
 // its kVstAudioEffectClass component
 DEF_CLASS2(
     INLINE_UID_FROM_FUID(kVST3TestProcessorUID),
-    PClassInfo::kManyInstances, // cardinality
-    kVstAudioEffectClass,       // the component category (do not changed this)
-    stringPluginName,           // here the Plug-in name (to be changed)
-    Vst::kDistributable,        // means that component and controller could be distributed on different computers
-    VST3TestVST3Category,       // Subcategory for this Plug-in (to be changed)
-    FULL_VERSION_STR,           // Plug-in version (to be changed)
-    kVstVersionString,          // the VST 3 SDK version (do not changed this, use always this define)
+    Steinberg::PClassInfo::kManyInstances, // cardinality
+    kVstAudioEffectClass,                  // the component category (do not changed this)
+    stringPluginName,                      // here the Plug-in name (to be changed)
+    Steinberg::Vst::kDistributable, // means that component and controller could be distributed on different computers
+    Steinberg::Vst::PlugType::kFx,  // Subcategory for this Plug-in (to be changed)
+    FULL_VERSION_STR,               // Plug-in version (to be changed)
+    kVstVersionString,              // the VST 3 SDK version (do not changed this, use always this define)
     VST3TestProcessor::createInstance) // function pointer called when this component should be instantiated
 
 // its kVstComponentControllerClass component
 DEF_CLASS2(
     INLINE_UID_FROM_FUID(kVST3TestControllerUID),
-    PClassInfo::kManyInstances,         // cardinality
-    kVstComponentControllerClass,       // the Controller category (do not changed this)
-    stringPluginName "Controller",      // controller name (could be the same than component name)
-    0,                                  // not used here
-    "",                                 // not used here
-    FULL_VERSION_STR,                   // Plug-in version (to be changed)
-    kVstVersionString,                  // the VST 3 SDK version (do not changed this, use always this define)
-    VST3TestController::createInstance) // function pointer called when this component should be instantiated
+    Steinberg::PClassInfo::kManyInstances, // cardinality
+    kVstComponentControllerClass,          // the Controller category (do not changed this)
+    stringPluginName "Controller",         // controller name (could be the same than component name)
+    0,                                     // not used here
+    "",                                    // not used here
+    FULL_VERSION_STR,                      // Plug-in version (to be changed)
+    kVstVersionString,                     // the VST 3 SDK version (do not changed this, use always this define)
+    VST3TestController::createInstance)    // function pointer called when this component should be instantiated
 
 //----for others Plug-ins contained in this factory, put like for the first Plug-in different DEF_CLASS2---
 
